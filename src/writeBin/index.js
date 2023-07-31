@@ -1,43 +1,25 @@
-const baudrates = document.getElementById("baudrates") as HTMLSelectElement;
-const connectButton = document.getElementById("connectButton") as HTMLButtonElement;
-const disconnectButton = document.getElementById("disconnectButton") as HTMLButtonElement;
-const resetButton = document.getElementById("resetButton") as HTMLButtonElement;
-const consoleStartButton = document.getElementById("consoleStartButton") as HTMLButtonElement;
-const consoleStopButton = document.getElementById("consoleStopButton") as HTMLButtonElement;
-const eraseButton = document.getElementById("eraseButton") as HTMLButtonElement;
-const addFileButton = document.getElementById("addFile") as HTMLButtonElement;
-const programButton = document.getElementById("programButton");
-const filesDiv = document.getElementById("files");
-const terminal = document.getElementById("terminal");
-const programDiv = document.getElementById("program");
+const baudrates = document.getElementById("baudrates");
+const disconnectButton = document.getElementById("disconnectButton");
+const connectButton = document.getElementById("connectButton");
 const consoleDiv = document.getElementById("console");
 const lblBaudrate = document.getElementById("lblBaudrate");
-const lblConsoleFor = document.getElementById("lblConsoleFor");
 const lblConnTo = document.getElementById("lblConnTo");
-const table = document.getElementById("fileTable") as HTMLTableElement;
+const eraseButton = document.getElementById("eraseButton");
+const filesDiv = document.getElementById("files");
+const addFileButton = document.getElementById("addFile");
+const table = document.getElementById("fileTable");
 const alertDiv = document.getElementById("alertDiv");
-require('./jquery.min.js')
-import './index.css'
-// @ts-nocheck
-// This is a frontend example of Esptool-JS using local bundle file
-// To optimize use a CDN hosted version like
-// https://unpkg.com/esptool-js@0.2.0/bundle.js
-import { ESPLoader, FlashOptions, LoaderOptions, Transport } from "esptool-js";
-import { Terminal } from "xterm";
-import CryptoJS  from 'crypto-js'
-const term = new Terminal({ cols: 120, rows: 40 });
-term.open(terminal);
-
+const programButton = document.getElementById("programButton");
+import { ESPLoader, Transport } from "esptool-js";
+import { setTerm, term } from "../xterm/index";
+import CryptoJS from "crypto-js";
+let chip = null;
+let transport;
+let esploader;
 let device = null;
-let transport: Transport;
-let chip: string = null;
-let esploader: ESPLoader;
-
 disconnectButton.style.display = "none";
 eraseButton.style.display = "none";
-consoleStopButton.style.display = "none";
 filesDiv.style.display = "none";
-
 function handleFileSelect(evt) {
   const file = evt.target.files[0];
 
@@ -45,7 +27,7 @@ function handleFileSelect(evt) {
 
   const reader = new FileReader();
 
-  reader.onload = (ev: ProgressEvent<FileReader>) => {
+  reader.onload = (ev) => {
     evt.target.data = ev.target.result;
   };
 
@@ -54,40 +36,37 @@ function handleFileSelect(evt) {
 
 const espLoaderTerminal = {
   clean() {
-    term.clear();
+    term&&term.clear();
   },
   writeLine(data) {
-    term.writeln(data);
+    term&&term.writeln(data);
   },
   write(data) {
-    term.write(data);
+    term&&term.write(data);
   },
 };
 
 connectButton.onclick = async () => {
   if (device === null) {
-    // @ts-ignore
     device = await navigator.serial.requestPort({});
     transport = new Transport(device);
   }
-
+  setTerm(transport);
   try {
     const flashOptions = {
       transport,
       baudrate: parseInt(baudrates.value),
       terminal: espLoaderTerminal,
-    } as LoaderOptions;
+    };
     esploader = new ESPLoader(flashOptions);
 
     chip = await esploader.main_fn();
-
     // Temporarily broken
     // await esploader.flash_id();
   } catch (e) {
     console.error(e);
     term.writeln(`Error: ${e.message}`);
   }
-
   console.log("Settings done for :" + chip);
   lblBaudrate.style.display = "none";
   lblConnTo.innerHTML = "Connected to device: " + chip;
@@ -98,18 +77,6 @@ connectButton.onclick = async () => {
   eraseButton.style.display = "initial";
   filesDiv.style.display = "initial";
   consoleDiv.style.display = "none";
-};
-
-resetButton.onclick = async () => {
-  if (device === null) {
-    // @ts-ignore
-    device = await navigator.serial.requestPort({});
-    transport = new Transport(device);
-  }
-
-  await transport.setDTR(false);
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  await transport.setDTR(true);
 };
 
 eraseButton.onclick = async () => {
@@ -182,7 +149,6 @@ function cleanUp() {
 
 disconnectButton.onclick = async () => {
   if (transport) await transport.disconnect();
-
   term.clear();
   baudrates.style.display = "initial";
   connectButton.style.display = "initial";
@@ -194,46 +160,7 @@ disconnectButton.onclick = async () => {
   consoleDiv.style.display = "initial";
   cleanUp();
 };
-
-let isConsoleClosed = false;
-consoleStartButton.onclick = async () => {
-  if (device === null) {
-    // @ts-ignore
-    device = await navigator.serial.requestPort({});
-    transport = new Transport(device);
-  }
-  lblConsoleFor.style.display = "block";
-  consoleStartButton.style.display = "none";
-  consoleStopButton.style.display = "initial";
-  programDiv.style.display = "none";
-
-  await transport.connect();
-  isConsoleClosed = false;
-
-  while (true && !isConsoleClosed) {
-    console.log(111)
-    const val = await transport.rawRead();
-    console.log(val);
-    if (typeof val !== "undefined") {
-      term.write(val);
-    } else {
-      break;
-    }
-  }
-  console.log("quitting console");
-};
-
-consoleStopButton.onclick = async () => {
-  console.log('stop')
-  isConsoleClosed = true;
-  await transport.disconnect();
-  await transport.waitForUnlock(1500);
-  term.clear();
-  consoleStartButton.style.display = "initial";
-  consoleStopButton.style.display = "none";
-  programDiv.style.display = "initial";
-};
-
+addFileButton.onclick(this);
 function validate_program_inputs() {
   const offsetArr = [];
   const rowCount = table.rows.length;
@@ -250,9 +177,11 @@ function validate_program_inputs() {
     offset = parseInt(offSetObj.value);
 
     // Non-numeric or blank offset
-    if (Number.isNaN(offset)) return "Offset field in row " + index + " is not a valid address!";
+    if (Number.isNaN(offset))
+      return "Offset field in row " + index + " is not a valid address!";
     // Repeated offset used
-    else if (offsetArr.includes(offset)) return "Offset field in row " + index + " is already in use!";
+    else if (offsetArr.includes(offset))
+      return "Offset field in row " + index + " is already in use!";
     else offsetArr.push(offset);
 
     const fileObj = row.cells[1].childNodes[0];
@@ -281,10 +210,10 @@ programButton.onclick = async () => {
   for (let index = 1; index < table.rows.length; index++) {
     const row = table.rows[index];
 
-    const offSetObj = row.cells[0].childNodes[0] as HTMLInputElement;
+    const offSetObj = row.cells[0].childNodes[0];
     const offset = parseInt(offSetObj.value);
 
-    const fileObj = row.cells[1].childNodes[0] as ChildNode & { data: string };
+    const fileObj = row.cells[1].childNodes[0];
     const progressBar = row.cells[2].childNodes[0];
 
     progressBar.textContent = "0";
@@ -297,7 +226,7 @@ programButton.onclick = async () => {
   }
 
   try {
-    const flashOptions: FlashOptions = {
+    const flashOptions = {
       fileArray: fileArray,
       flashSize: "keep",
       eraseAll: false,
@@ -305,8 +234,9 @@ programButton.onclick = async () => {
       reportProgress: (fileIndex, written, total) => {
         progressBars[fileIndex].value = (written / total) * 100;
       },
-      calculateMD5Hash: (image) => CryptoJS.MD5(CryptoJS.enc.Latin1.parse(image)),
-    } as FlashOptions;
+      calculateMD5Hash: (image) =>
+        CryptoJS.MD5(CryptoJS.enc.Latin1.parse(image)),
+    };
     await esploader.write_flash(flashOptions);
   } catch (e) {
     console.error(e);
@@ -319,5 +249,3 @@ programButton.onclick = async () => {
     }
   }
 };
-
-addFileButton.onclick(this);
